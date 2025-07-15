@@ -21,3 +21,15 @@ class Linear(Module):
         return (input @ self._w) + self._b
     def parameters(self):
         return {"weights" : self._w, "biases": self._b,"grad": self._w._grad}
+    
+class optimiser():
+    def __init__(self, layers, lr):
+        self._layers = layers
+        self._lr = lr
+    def step(self):
+        for layer in self._layers:
+            update_w = layer._w.grad * (-1 * self._lr)
+            layer._w = layer._w + update_w
+            update_b = layer._b.grad * (-1 * self._lr)
+            layer._b = layer._b + update_b
+            
