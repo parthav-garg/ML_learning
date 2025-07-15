@@ -28,8 +28,9 @@ class optimiser():
         self._lr = lr
     def step(self):
         for layer in self._layers:
-            update_w = layer._w.grad * (-1 * self._lr)
-            layer._w = layer._w + update_w
-            update_b = layer._b.grad * (-1 * self._lr)
-            layer._b = layer._b + update_b
-            
+            layer._w._data += layer._w._grad * (-1 * self._lr)
+            layer._b._data += layer._b._grad * (-1 * self._lr)
+    def zero_grad(self):
+        for layer in self._layers:
+            layer._w._grad = np.zeros_like(layer._w._grad)
+            layer._b._grad = np.zeros_like(layer._b._grad)

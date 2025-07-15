@@ -36,7 +36,7 @@ class Tensor:
         other = other if isinstance(other, Tensor) else Tensor(other, ())
         c = Tensor(self._data - other._data, _prev=(self, other))
         def backward_fn():
-            self._grad -= c._grad
+            self._grad += c._grad
 
         # For other (the bias), we must sum the gradient across the batch dimension.
         # This "un-broadcasts" the gradient to match the bias's shape.
@@ -78,9 +78,39 @@ class Tensor:
     def __div__(self, other):
         c = Tensor(self._data/ other._data, _prev=(self, other))
         return c
+    def __pow__(self, n):
+    
+        assert isinstance(n, (int, float)), "Power operation only supports int/float exponents"
+        
+        c = Tensor(self._data ** n, _prev=(self,))  
+        def _backward_fn():
+            self._grad += c._grad * (n * self._data**(n - 1))
+    
+        c._backward = _backward_fn
+        
+        return c
     def backward(self):
-        _graph[-1]._grad = np.array(1.0)
-        for node in reversed(_graph):
+        self._grad = np.ones_like(self._data)
+
+        # 2. Build the topological order of nodes in the computational graph
+        # This ensures we process nodes in the correct order (children before parents)
+        topo_order = []
+        visited = set()
+
+        def build_topo(node):
+            if node not in visited:
+                visited.add(node)
+                # Recursively visit parents first
+                for prev_node in node._prev:
+                    build_topo(prev_node)
+                # Add current node to the list after all its parents are added
+                topo_order.append(node)
+
+        build_topo(self) # Start building from the current tensor (which is your loss)
+
+        # 3. Propagate gradients backwards through the topologically sorted nodes
+        # Iterate in reverse order to go from loss back to inputs/parameters
+        for node in reversed(topo_order):
             node._backward()
     
     def __repr__(self):
