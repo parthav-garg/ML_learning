@@ -1,60 +1,65 @@
-from base.tensor import Tensor
+from sklearn.datasets import fetch_openml
 import numpy as np
-from nn import Linear
-from nn import Module
-from nn import optimiser
-from time import sleep
+from base.tensor import Tensor
+from nn import Linear, CrossEntropyloss, optimiser
 import random
-from base.tensor import _graph
+
 if __name__ == "__main__":
-    # 1. Create the multi-feature dataset
-    num_samples = 1000
-    num_features = 3
-    x = np.random.rand(num_samples, num_features) * 10
-    y = 5*x[:, 0] + 7*x[:, 1] + 10*x[:, 2] + 15
+    # 1. Load MNIST as (70000, 784)
+    mnist = fetch_openml('mnist_784', version=1, as_frame=False)
+    X, y = mnist['data'], mnist['target'].astype(int)
 
-    # 2. Calculate statistics for standardization (using axis=0 for x)
-    x_mean = np.mean(x, axis=0)
-    x_std = np.std(x, axis=0)
-    y_mean = np.mean(y)
-    y_std = np.std(y)
+    # 2. Normalize pixel values [0, 1]
+    X = X.astype(np.float64) / 255.0
 
-    # 3. Apply standardization
-    x_scaled = (x - x_mean) / x_std
-    y_scaled = (y - y_mean) / y_std
-    
-    # 4. Define the model with the correct input layer shape
-    l1 = Linear(3, 5) # Input features = 3
-    l2 = Linear(5, 1) # Output features = 1
-    
-    # 5. Your training loop (no changes needed here!)
-    optim = optimiser([l1, l2], .01) # A smaller learning rate is often safer
-    for i in range(2000): # More iterations might be needed
-        index = random.randint(0, num_samples - 1)
-        # x_scaled[index] is now a row with 3 features
-        out1 = l1(Tensor(x_scaled[index].reshape(1, -1)))
-        out2 = l2(out1)
-        loss = (out2 - Tensor(y_scaled[index].reshape(1, -1)))**2
-        if i % 200 == 0: # Print loss occasionally
-            print(loss)
+    # 3. Subsample for faster testing
+    num_samples = 60000
+    indices = np.random.choice(len(X), num_samples, replace=False)
+    X, y = X[indices], y[indices]
+
+    # 4. One-hot encode labels
+    num_classes = 10
+    y_one_hot = np.eye(num_classes)[y]
+
+    # 5. Model: 784 → 128 → 64 → 10
+    l1 = Linear(784, 128)
+    l2 = Linear(128, 64)
+    l3 = Linear(64, 10)
+
+    criterion = CrossEntropyloss()
+    optim = optimiser.SGD([l1, l2, l3], lr=0.01)
+
+    # 6. Training loop (single sample SGD)
+    for i in range(60000):
+        idx = random.randint(0, num_samples - 1)
+        x_tensor = Tensor(X[idx].reshape(1, -1))
+        y_tensor = Tensor(y_one_hot[idx].reshape(1, -1))
+
+        out = l1(x_tensor).ReLU()
+        out = l2(out).ReLU()
+        logits = l3(out)
+        probs = logits.softmax()
+
+        loss = criterion(probs, y_tensor)
+
+        if i % 1000 == 0:
+            print(f"Step {i} Loss: {loss}")
+            optim._lr *= 0.9
+
         loss.backward()
         optim.step()
         optim.zero_grad()
 
-    # 6. Test the trained model with a 3-feature input
-    print("\n--- Final Test ---")
-    original_x = np.array([2.0, 3.0, 4.0])
+ 
+    correct = 0
+    for idx in range(5000):
+        x_tensor = Tensor(X[idx].reshape(1, -1))
+        out = l1(x_tensor).ReLU()
+        out = l2(out).ReLU()
+        logits = l3(out)
+        probs = logits.softmax()
+        pred = np.argmax(probs._data)
+        if pred == y[idx]:
+            correct += 1
 
-    # Scale the test input using the training statistics
-    test_x_scaled = (original_x - x_mean) / x_std
-    input_tensor = Tensor(np.array(test_x_scaled).reshape(1, -1))
-    
-    # Get the prediction and un-scale it
-    scaled_prediction = l2(l1(input_tensor))
-    final_prediction = (scaled_prediction._data * y_std) + y_mean
-
-    # Compare to the ground truth
-    true_y = 5*original_x[0] + 7*original_x[1] + 10*original_x[2] + 15
-    print(f"Input: {original_x}")
-    print(f"Final prediction is: {final_prediction[0][0]:.4f}")
-    print(f"True answer is: {true_y}")
+    print(f"\nAccuracy on first 5000 samples: {correct/50}%") #94.56%
