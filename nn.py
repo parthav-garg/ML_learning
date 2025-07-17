@@ -21,7 +21,8 @@ class Module():
         """
         params = []
         for module in self._modules.values():
-            params.append(module)
+            params.extend(module.parameters())
+            print(params)
         return params
 class Linear(Module):
     """Class to create a Linear Layere"""
