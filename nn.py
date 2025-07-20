@@ -8,13 +8,18 @@ class Module():
         
     def forward(self, *input, **kwargs):
         # This is an abstract method; subclasses must implement it.
+        
         raise NotImplementedError
+    
     def __call__(self, *input, **kwargs):
+        """used to instantiate the forward pass of the module"""
         return self.forward(*input, **kwargs)
     def __setattr__(self, key, value):
+        
         if isinstance(value, Module):
             self._modules[key] = value
         super().__setattr__(key, value)
+    
     def parameters(self):
         """
         Recursively collects parameters from all registered sub-modules.
@@ -22,8 +27,8 @@ class Module():
         params = []
         for module in self._modules.values():
             params.extend(module.parameters())
-            print(params)
         return params
+
 class Linear(Module):
     """Class to create a Linear Layere"""
     def __init__(self, in_features, out_features):
@@ -45,11 +50,51 @@ class Linear(Module):
     def parameters(self):
         """Returns the parameters of the layer."""
         return [self._w, self._b]
-    
-class MSEloss(Module):
+
+class ReLU(Module):
     def __init__(self):
         super().__init__()
+
+    def forward(self, input_tensor):
+        """Applies the ReLU activation function to the input tensor."""
+        return input_tensor.ReLU()
+
+class Conv1D(Module):
+    def __init__(self, in_channels, out_channels, kernel_size=1, stride=1, padding=0, batch_size=1):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.weights = Tensor(np.random.normal(0, .1, size=(out_channels, in_channels, kernel_size)))
+        self.bias = Tensor(np.zeros(out_channels))
+    def forward(self, input_tensor):
+        B, L_in, C_in = input_tensor.get_shape()
+        if self.padding > 0:
+            x_padded = np.pad(input_tensor._data, 
+                              ((0, 0), (self.padding, self.padding), (0, 0)), 
+                              'constant')
+        else:
+            x_padded = input_tensor._data
+        windows = Tensor(np.lib.stride_tricks.sliding_window_view(input_tensor._data, window_shape=(self.kernel_size, self.in_channels)))
+        
+        return output + self.bias
+class MSEloss(Module):
+    
+    def __init__(self):
+        super().__init__()
+    
     def forward(self, pred, true):
+        """Computes the mean squared error loss.
+
+        Args:
+            pred (Tensor): The predicted output.
+            true (Tensor): The ground truth output.
+
+        Returns:
+            Tensor: The computed loss.
+        """
         diff = pred - true
         squared_diff = diff ** 2
         mean = squared_diff.mean()
@@ -59,24 +104,30 @@ class CrossEntropyloss(Module):
     def __init__(self):
         super().__init__()
     def forward(self, pred, true):
+        """Computes the cross-entropy loss.
+
+        Args:
+            pred (Tensor): The predicted output probabilities.
+            true (Tensor): The ground truth output (one-hot encoded).
+
+        Returns:
+            Tensor: The computed loss.
+        """
         log_pred = pred.log()
         diff = true * log_pred
         total_diff = diff.sum()
         loss = -total_diff
         return loss
-        
+
 class optimizer():
     class SGD():
-        def __init__(self, layers, lr, batch_size=1):
-            self._layers = layers
+        def __init__(self, model, lr):
+            self._model = model
             self._lr = lr
-            self._batch_size = batch_size
         def step(self):
-            for layer in self._layers:
-                for parameter in layer.parameters():
-                    parameter._data += parameter._grad * (-1 * self._lr)
-                
+            for parameter in self._model.parameters():
+                parameter._data += parameter._grad * (-1 * self._lr)
+
         def zero_grad(self):
-            for layer in self._layers:
-                for parameter in layer.parameters():
-                    parameter._grad = np.zeros_like(parameter._grad)
+            for parameter in self._model.parameters():
+                parameter._grad = np.zeros_like(parameter._grad)

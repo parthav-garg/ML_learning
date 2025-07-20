@@ -1,6 +1,27 @@
 import numpy as np
 eps = 1e-9
 class Tensor:
+    @staticmethod
+    def _sum_to_match_shape(raw_grad, original_shape):
+        """
+        Sums a raw gradient so its shape matches the original tensor's shape.
+        Handles broadcasting where dimensions were added or stretched.
+        """
+        # 1. If ndim is different, sum along the new prepended axes
+        if raw_grad.ndim != len(original_shape):
+            axes_to_sum = tuple(range(raw_grad.ndim - len(original_shape)))
+            raw_grad = np.sum(raw_grad, axis=axes_to_sum)
+
+        # 2. For any remaining dimensions that were stretched (from 1 to >1),
+        #    sum along those axes.
+        axes_to_sum = tuple([
+            i for i, (dim_raw, dim_orig) in enumerate(zip(raw_grad.shape, original_shape))
+            if dim_raw != dim_orig
+        ])
+        if axes_to_sum:
+            raw_grad = np.sum(raw_grad, axis=axes_to_sum, keepdims=True)
+
+        return raw_grad
     def __init__(self, data, _prev=()):
         self._data = np.array(data, dtype=np.float64)
         self._prev = set(_prev)
@@ -19,12 +40,13 @@ class Tensor:
         other = other if isinstance(other, Tensor) else Tensor(other, ())
         c = Tensor(self._data + other._data, _prev=(self, other))
         def backward_fn():
-            self._grad += c._grad
-            grad_for_other = c._grad
-            if other._data.ndim < grad_for_other.ndim:
-                axes_to_sum = tuple(range(grad_for_other.ndim - other._data.ndim))
-                grad_for_other = np.sum(grad_for_other, axis=axes_to_sum)
+            raw_grad_self = c._grad
+            raw_grad_other = c._grad
 
+            grad_for_self = Tensor._sum_to_match_shape(raw_grad_self, self._data.shape)
+            grad_for_other = Tensor._sum_to_match_shape(raw_grad_other, other._data.shape)
+
+            self._grad += grad_for_self
             other._grad += grad_for_other
         c._backward = backward_fn
         return c
@@ -39,7 +61,6 @@ class Tensor:
             Tensor: A new tensor representing the sum.
         """
         return self + other
-        return self + other
     
     def __sub__(self, other):
         """Subtracts two tensors.
@@ -53,17 +74,26 @@ class Tensor:
         other = other if isinstance(other, Tensor) else Tensor(other, ())
         c = Tensor(self._data - other._data, _prev=(self, other))
         def backward_fn():
-            self._grad += c._grad
-            grad_for_other = c._grad
-            if other._data.ndim < grad_for_other.ndim:
-                axes_to_sum = tuple(range(grad_for_other.ndim - other._data.ndim))
-                grad_for_other = np.sum(grad_for_other, axis=axes_to_sum)
+            raw_grad_self = c._grad
+            raw_grad_other = c._grad
 
+            grad_for_self = Tensor._sum_to_match_shape(raw_grad_self, self._data.shape)
+            grad_for_other = Tensor._sum_to_match_shape(raw_grad_other, other._data.shape)
+
+            self._grad += grad_for_self
             other._grad -= grad_for_other
         c._backward = backward_fn
         return c
     
     def __rsub__(self, other):
+        """Subtracts two tensors.
+
+        Args:
+            other (Tensor or numeric): The tensor or numeric value to subtract.
+
+        Returns:
+            Tensor: A new tensor representing the difference.
+        """
         return self - other
     
     def __mul__(self, other):
@@ -79,8 +109,14 @@ class Tensor:
         c = Tensor(self._data * other._data, _prev=(self, other))
 
         def backward_fn():
-            self._grad += other._data * c._grad
-            other._grad += self._data * c._grad
+            raw_grad_self = other._data * c._grad
+            raw_grad_other = self._data * c._grad
+
+            grad_for_self = Tensor._sum_to_match_shape(raw_grad_self, self._data.shape)
+            grad_for_other = Tensor._sum_to_match_shape(raw_grad_other, other._data.shape)
+
+            self._grad += grad_for_self
+            other._grad += grad_for_other
         c._backward = backward_fn
         return c
     
@@ -131,17 +167,21 @@ class Tensor:
         c._backward = backward_fn
         return c
     
-    def sum(self):
-        """Computes the sum of the tensor.
-
-        Returns:
-            Tensor: A new tensor representing the sum.
-        """
-        c = Tensor(self._data.sum(), _prev=(self,))
+    def sum(self, axis=None, keepdims=False):
+        """Computes the sum of the tensor over given axes."""
+        c = Tensor(self._data.sum(axis=axis, keepdims=keepdims), _prev=(self,))
+        
         def backward_fn():
-            self._grad += c._grad
-        c._backward = backward_fn 
-        return c   
+            
+            if axis is None:
+                self._grad += c._grad 
+            else:
+                output_shape = np.array(self._data.shape)
+                output_shape[list(axis)] = 1
+                self._grad += np.broadcast_to(c._grad, self._data.shape)
+
+        c._backward = backward_fn
+        return c
     def __pow__(self, n):
         """Computes the power of the tensor.
 
@@ -165,9 +205,11 @@ class Tensor:
         Returns:
             Tensor: A new tensor representing the natural logarithm.
         """
+        global eps
         c = Tensor(np.log(self._data), _prev=(self,))
+        c += eps  
         def backward_fn():
-            self._grad += c._grad / (self._data + eps)
+            self._grad += c._grad / (self._data)
         c._backward = backward_fn
         return c
     
@@ -218,6 +260,96 @@ class Tensor:
         c._backward = backward_fn
         return c
     
+    def reshape(self, *new_shape):
+        """Reshapes the tensor to a new shape.
+
+        Args:
+            *new_shape: The new shape to reshape the tensor to.
+
+        Returns:
+            Tensor: A new tensor with the specified shape.
+        """
+        c = Tensor(self._data.reshape(new_shape), _prev=(self,))
+        
+        def backward_fn():
+            self._grad += c._grad.reshape(self._data.shape)
+        
+        c._backward = backward_fn
+        return c
+    
+    def create_padding_width(self, padding, *axis):
+        """Creates a padding width for the tensor.
+
+        Args:
+            padding (int): The number of zeros to pad.
+            axis (int): The axis along which to pad.
+
+        Returns:
+            tuple: A tuple representing the padding width.
+        """
+        padding_width = np.array([(0, 0)] * self._data.ndim)
+        for ax in axis:
+            padding_width[ax] = (padding, padding)
+        return tuple(padding_width)
+    
+    def pad_1d(self, padding, dims=[1,]):
+        """Pads the tensor with zeros on both sides.
+
+        Args:
+            padding (int): The number of zeros to pad on each side.
+
+        Returns:
+            Tensor: A new tensor with the specified padding.
+        """
+        padding_width = self.create_padding_width(padding, dims)
+        padded_data = np.pad(self._data, padding_width, mode='constant', constant_values=0)
+        c = Tensor(padded_data, _prev=(self,))
+        def backward_fn():
+            slicing_list = np.array([slice(None)] * self._data.ndim)
+            for dim in dims:
+                if dim < self._data.ndim:
+                    slicing_list[dim] = slice(padding, -padding if padding != 0 else None)
+
+            slicing_tuple = tuple(slicing_list)
+            self._grad += c._grad[slicing_tuple]
+        c._backward = backward_fn
+        return c
+
+    def conv_1d(self, kernel, stride=1, padding=0):
+        """Performs a 1D convolution operation on the tensor.
+
+        Args:
+            kernel (Tensor): The kernel to convolve with.
+            stride (int): The stride of the convolution.
+            padding (int): The amount of zero-padding to apply.
+
+        Returns:
+            Tensor: A new tensor representing the result of the convolution.
+        """
+        if padding > 0:
+            padded_data = self.pad_1d(padding)
+        else:
+            padded_data = self
+        
+        output_length = (padded_data._data.shape[0] - kernel._data.shape[0]) // stride + 1
+        output = np.zeros((output_length, self._data.shape[1]))
+        
+        for i in range(output_length):
+            start = i * stride
+            end = start + kernel._data.shape[0]
+            
+        
+        c = Tensor(output, _prev=(self,))
+        
+        def backward_fn():
+            for i in range(output_length):
+                start = i * stride
+                end = start + kernel._data.shape[0]
+                self._grad[start:end] += c._grad[i] * kernel._data
+        
+        c._backward = backward_fn
+        return c
+    
     def backward(self):
         """Computes the backward pass for the tensor.
         """
@@ -239,6 +371,9 @@ class Tensor:
         return self._data.__str__()
     
     def __str__(self):
+        """Returns a string representation of the tensor."""
         return self._data.__str__()
+    
     def get_shape(self):
+        """Returns the shape of the tensor."""
         return self._data.shape

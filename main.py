@@ -3,7 +3,8 @@ import numpy as np
 from base.tensor import Tensor
 from nn import Linear, CrossEntropyloss, optimizer, Module
 import random
-
+from DataLoader import DataLoader
+from nn import ReLU
 if __name__ == "__main__":
     # 1. Load and Split Data (Unchanged)
     # ... (same as before) ...
@@ -15,45 +16,52 @@ if __name__ == "__main__":
     num_train_samples, num_test_samples = X_train.shape[0], X_test.shape[0]
     num_classes = 10
     y_train_one_hot = np.eye(num_classes)[y_train]
+    data = DataLoader(X_train, y_train_one_hot, batch_size=64, shuffle=True)
     # In your main script, define your model class
     class Linear_Model(Module):
         def __init__(self):
             super().__init__()
             # Because Linear is a Module, these layers are auto-registered
-            self.l1 = Linear(784, 128)
-            self.l2 = Linear(128, 64)
-            self.l3 = Linear(64, 10)
+            self.l1 = Linear(784, 256)
+            self.relu = ReLU()
+            self.l2 = Linear(256, 128)
+            self.l3 = Linear(128, 64)
+            self.l4 = Linear(64, 10)
 
         def forward(self, x):
             """
             Defines the data flow through the layers.
             """
-            x = self.l1(x).ReLU()
-            x = self.l2(x).ReLU()
-            logits = self.l3(x)
+            x = self.l1(x)
+            x = self.relu(x)
+            x = self.l2(x)
+            x = self.relu(x)
+            x = self.l3(x)
+            x = self.relu(x)
+            x = self.l4(x)
+            logits = x
             return logits
     # ===================================================================
     # 2. INSTANTIATE YOUR NEW PYTORCH-LIKE MODEL
     # ===================================================================
-    model = Linear_Model() # So clean!
+    model = Linear_Model() 
     criterion = CrossEntropyloss()
-    # The optimizer call is now perfect. It gets all parameters automatically.
-    optim = optimizer.SGD(model.parameters(), lr=0.01)
+
+    optim = optimizer.SGD(model, lr=0.01)
 
     # 3. Training Loop (Now uses the model object)
     batch_size = 64
-    epochs = 10
+    epochs = 3
 
     for epoch in range(epochs):
         # ... (shuffling code is the same) ...
-        permutation = np.random.permutation(num_train_samples)
+        ''' permutation = np.random.permutation(num_train_samples)
         X_train_shuffled = X_train[permutation]
-        y_train_one_hot_shuffled = y_train_one_hot[permutation]
-        
+        y_train_one_hot_shuffled = y_train_one_hot[permutation]'''
         epoch_loss = 0.0
-        for i in range(0, num_train_samples, batch_size):
-            x_batch = X_train_shuffled[i:i+batch_size]
-            y_batch = y_train_one_hot_shuffled[i:i+batch_size]
+        for x_batch, y_batch in data:
+            #x_batch = X_train_shuffled[i:i+batch_size]
+            #y_batch = y_train_one_hot_shuffled[i:i+batch_size]
             x_tensor = Tensor(x_batch)
             y_tensor = Tensor(y_batch)
 
