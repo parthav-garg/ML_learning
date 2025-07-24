@@ -314,7 +314,14 @@ class Tensor:
             self._grad += c._grad[slicing_tuple]
         c._backward = backward_fn
         return c
-
+    
+    def __getitem__(self, index):
+        c = Tensor(self._data[index], _prev=(self,))
+        def backward_fn():
+            self._grad[index] += c._grad
+        c._backward = backward_fn
+        return c
+    
     def conv_1d(self, kernel, stride=1, padding=0):
         """Performs a 1D convolution operation on the tensor.
 
@@ -337,7 +344,8 @@ class Tensor:
         for i in range(output_length):
             start = i * stride
             end = start + kernel._data.shape[0]
-            
+            window = self[start:end]
+
         
         c = Tensor(output, _prev=(self,))
         
