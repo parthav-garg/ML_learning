@@ -174,11 +174,21 @@ class Tensor:
         def backward_fn():
             
             if axis is None:
-                self._grad += c._grad 
-            else:
-                output_shape = np.array(self._data.shape)
-                output_shape[list(axis)] = 1
                 self._grad += np.broadcast_to(c._grad, self._data.shape)
+            else:
+                sum_axes = axis if isinstance(axis, (list, tuple)) else (axis,)
+                
+                target_shape = [1] * self._data.ndim
+                
+                grad_shape = list(c._grad.shape)
+
+                j = 0
+                for i in range(self._data.ndim):
+                    if i not in sum_axes:
+                        target_shape[i] = grad_shape[j]
+                        j += 1
+                reshaped_grad = c._grad.reshape(target_shape)
+                self._grad += reshaped_grad
 
         c._backward = backward_fn
         return c
@@ -321,8 +331,11 @@ class Tensor:
             self._grad[index] += c._grad
         c._backward = backward_fn
         return c
-    
-    def conv_1d(self, kernel, stride=1, padding=0):
+    def __setitem__(self, index, other):
+        other = other if isinstance(other, Tensor) else Tensor(other)
+        self._data[index] =  other._data
+        
+    def conv_1d(self, kernels, stride=1, padding=0):
         """Performs a 1D convolution operation on the tensor.
 
         Args:
@@ -334,26 +347,34 @@ class Tensor:
             Tensor: A new tensor representing the result of the convolution.
         """
         if padding > 0:
-            padded_data = self.pad_1d(padding)
+            padded_data = self.pad_1d(padding, dims=[2]) 
+
         else:
             padded_data = self
         
-        output_length = (padded_data._data.shape[0] - kernel._data.shape[0]) // stride + 1
-        output = np.zeros((output_length, self._data.shape[1]))
+        batch_size, in_channels, length = padded_data.get_shape()
+        out_channels, _, kernel_size = kernels.get_shape()
+        output_length = (length - kernel_size) // stride + 1
+        np_outputs = np.zeros((batch_size, out_channels, output_length))
+        tensor_comp = []
         
         for i in range(output_length):
             start = i * stride
-            end = start + kernel._data.shape[0]
-            window = self[start:end]
+            end = start + kernel_size
+            window = padded_data[:, :, start:end]
+            ccr = (window.reshape(batch_size, 1, in_channels, kernel_size) * kernels.reshape(1, out_channels, in_channels, kernel_size)).sum(axis=(2, 3))
+            tensor_comp.append(ccr)
+            np_outputs[:, :, i] = ccr._data
 
-        
-        c = Tensor(output, _prev=(self,))
+        parents = {self, kernels}
+        c = Tensor(np_outputs, _prev=parents)
         
         def backward_fn():
             for i in range(output_length):
-                start = i * stride
-                end = start + kernel._data.shape[0]
-                self._grad[start:end] += c._grad[i] * kernel._data
+                tensor = tensor_comp[i]
+                grad_slice = c._grad[: , : , i]
+                tensor._grad += grad_slice.reshape(tensor.get_shape())
+                tensor._backward()
         
         c._backward = backward_fn
         return c

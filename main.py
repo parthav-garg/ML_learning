@@ -1,96 +1,128 @@
 from sklearn.datasets import fetch_openml
+from sklearn.model_selection import train_test_split
 import numpy as np
 from base.tensor import Tensor
-from nn import Linear, CrossEntropyloss, optimizer, Module
-import random
+# Make sure to import your Conv1D class!
+from nn import Linear, CrossEntropyloss, optimizer, Module, ReLU, Conv1D
 from DataLoader import DataLoader
-from nn import ReLU
-if __name__ == "__main__":
-    # 1. Load and Split Data (Unchanged)
-    # ... (same as before) ...
-    mnist = fetch_openml('mnist_784', version=1, as_frame=False)
-    X, y = mnist['data'], mnist['target'].astype(int)
-    X = X.astype(np.float64) / 255.0
-    X_train, X_test = X[:60000], X[60000:]
-    y_train, y_test = y[:60000], y[60000:]
-    num_train_samples, num_test_samples = X_train.shape[0], X_test.shape[0]
-    num_classes = 10
-    y_train_one_hot = np.eye(num_classes)[y_train]
-    data = DataLoader(X_train, y_train_one_hot, batch_size=64, shuffle=True)
-    # In your main script, define your model class
-    class Linear_Model(Module):
-        def __init__(self):
-            super().__init__()
-            # Because Linear is a Module, these layers are auto-registered
-            self.l1 = Linear(784, 256)
-            self.relu = ReLU()
-            self.l2 = Linear(256, 128)
-            self.l3 = Linear(128, 64)
-            self.l4 = Linear(64, 10)
 
-        def forward(self, x):
-            """
-            Defines the data flow through the layers.
-            """
-            x = self.l1(x)
-            x = self.relu(x)
-            x = self.l2(x)
-            x = self.relu(x)
-            x = self.l3(x)
-            x = self.relu(x)
-            x = self.l4(x)
-            logits = x
-            return logits
-    # ===================================================================
-    # 2. INSTANTIATE YOUR NEW PYTORCH-LIKE MODEL
-    # ===================================================================
-    model = Linear_Model() 
-    criterion = CrossEntropyloss()
+# ===================================================================
+# 1. LOAD THE 1D-FRIENDLY ECG5000 DATASET
+# ===================================================================
+# Fetch the data
+ecg = fetch_openml('ECG5000', version=1, as_frame=False)
 
-    optim = optimizer.SGD(model, lr=0.01)
+# The data is in 'data', labels in 'target'
+X = ecg['data'].astype(np.float64)
+y = ecg['target'].astype(int)
 
-    # 3. Training Loop (Now uses the model object)
-    batch_size = 64
-    epochs = 3
+# --- Important: The labels are 1-5, we need them to be 0-4 ---
+y = y - 1
 
-    for epoch in range(epochs):
-        # ... (shuffling code is the same) ...
-        ''' permutation = np.random.permutation(num_train_samples)
-        X_train_shuffled = X_train[permutation]
-        y_train_one_hot_shuffled = y_train_one_hot[permutation]'''
-        epoch_loss = 0.0
-        for x_batch, y_batch in data:
-            #x_batch = X_train_shuffled[i:i+batch_size]
-            #y_batch = y_train_one_hot_shuffled[i:i+batch_size]
-            x_tensor = Tensor(x_batch)
-            y_tensor = Tensor(y_batch)
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
 
-            # --- FORWARD PASS ---
-            logits = model(x_tensor) # Call the model like a function
-            
-            # --- LOSS AND BACKWARD ---
-            probs = logits.softmax()
-            loss = criterion(probs, y_tensor)
-            epoch_loss += loss._data
-            loss.backward()
-            optim.step()
-            optim.zero_grad()
-            
-        optim._lr *= 0.9
-        print(f"Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss / (num_train_samples / batch_size)}")
+num_classes = 5
+y_train_one_hot = np.eye(num_classes)[y_train]
 
-    # 4. Evaluation Loop (Also uses the model object)
-    print("\nStarting evaluation on the unseen test set...")
-    correct = 0
-    for i in range(0, num_test_samples, batch_size):
-        x_batch = X_test[i:i+batch_size]
-        y_batch_labels = y_test[i:i+batch_size]
+# Use your excellent DataLoader
+data = DataLoader(X_train, y_train_one_hot, batch_size=32, shuffle=True)
+num_train_samples = X_train.shape[0]
+num_test_samples = X_test.shape[0]
+
+# ===================================================================
+# 2. DEFINE A CONV MODEL SUITABLE FOR THE ECG DATA
+# ===================================================================
+class ECG_Conv_Model(Module):
+    def __init__(self):
+        super().__init__()
+        # Each ECG signal has 140 time steps and 1 channel.
+
+        # Layer 1: Takes 1 input channel, produces 16 feature maps.
+        # Padding 'same' equivalent: padding = (kernel_size - 1) // 2 = (5-1)//2 = 2
+        self.conv1 = Conv1D(in_channels=1, out_channels=16, kernel_size=5, stride=1, padding=2)
+        self.relu1 = ReLU()
+
+        # Layer 2: Takes the 16 feature maps, produces 32 new ones.
+        # Padding 'same' equivalent: padding = (3-1)//2 = 1
+        self.conv2 = Conv1D(in_channels=16, out_channels=32, kernel_size=3, stride=1, padding=1)
+        self.relu2 = ReLU()
+
+        # After convolutions, the output shape is (batch_size, 32, 140).
+        # We flatten this for the final linear layer.
+        self.fc1 = Linear(32 * 140, num_classes)
+
+    def forward(self, x):
+        batch_size = x.get_shape()[0]
+
+        # 1. Reshape input from (batch, 140) to (batch, 1, 140) for Conv1D
+        x = x.reshape(batch_size, 1, 140)
+
+        # 2. Pass through conv layers
+        x = self.conv1(x)
+        x = self.relu1(x)
+        x = self.conv2(x)
+        x = self.relu2(x)
+
+        # 3. Flatten the output for the linear layer
+        x = x.reshape(batch_size, 32 * 140)
+
+        # 4. Final classification layer
+        logits = self.fc1(x)
+        return logits
+
+# ===================================================================
+# 3. INSTANTIATE MODEL, LOSS, AND OPTIMIZER
+# ===================================================================
+model = ECG_Conv_Model()
+criterion = CrossEntropyloss()
+# Using a smaller learning rate is often a good starting point for CNNs
+optim = optimizer.SGD(model, lr=0.001)
+
+# ===================================================================
+# 4. TRAINING LOOP
+# ===================================================================
+epochs = 10 # Let's train for a few more epochs on this smaller dataset
+
+for epoch in range(epochs):
+    epoch_loss = 0.0
+    for x_batch, y_batch in data:
         x_tensor = Tensor(x_batch)
+        y_tensor = Tensor(y_batch)
 
+        # --- FORWARD PASS ---
         logits = model(x_tensor)
+        
+        # --- LOSS AND BACKWARD ---
         probs = logits.softmax()
-        preds = np.argmax(probs._data, axis=1)
-        correct += np.sum(preds == y_batch_labels)
+        loss = criterion(probs, y_tensor)
+        epoch_loss += loss._data
+        loss.backward()
+        optim.step()
+        optim.zero_grad()
+    
+    # Optional: decay learning rate
+    optim._lr *= 0.95
+    print(f"Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss / len(data):.4f}")
 
-    accuracy = (correct / num_test_samples) * 100
-    print(f"\nAccuracy on {num_test_samples} unseen test samples: {accuracy:.2f}%")
+# ===================================================================
+# 5. EVALUATION LOOP
+# ===================================================================
+print("\nStarting evaluation on the unseen test set...")
+correct = 0
+# Create a test DataLoader for easier batching
+test_data = DataLoader(X_test, np.eye(num_classes)[y_test], batch_size=32)
+
+for x_batch, y_batch_one_hot in test_data:
+    x_tensor = Tensor(x_batch)
+    y_batch_labels = np.argmax(y_batch_one_hot, axis=1) # Get original labels
+
+    logits = model(x_tensor)
+    probs = logits.softmax()
+    preds = np.argmax(probs._data, axis=1)
+    correct += np.sum(preds == y_batch_labels)
+
+accuracy = (correct / num_test_samples) * 100
+print(f"\nAccuracy on {num_test_samples} unseen test samples: {accuracy:.2f}%")

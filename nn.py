@@ -67,19 +67,16 @@ class Conv1D(Module):
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
-        self.weights = Tensor(np.random.normal(0, .1, size=(out_channels, in_channels, kernel_size)))
-        self.bias = Tensor(np.zeros(out_channels))
+        self.kernels = Tensor(np.random.normal(0, .1, size=(out_channels, in_channels, kernel_size)))
+        self.bias = Tensor(np.zeros((1, out_channels, 1)))
     def forward(self, input_tensor):
-        B, L_in, C_in = input_tensor.get_shape()
-        if self.padding > 0:
-            x_padded = np.pad(input_tensor._data, 
-                              ((0, 0), (self.padding, self.padding), (0, 0)), 
-                              'constant')
-        else:
-            x_padded = input_tensor._data
-        windows = Tensor(np.lib.stride_tricks.sliding_window_view(input_tensor._data, window_shape=(self.kernel_size, self.in_channels)))
-        
+        if len(input_tensor.get_shape()) < 3:
+            shape = input_tensor.get_shape()
+            input_tensor = input_tensor.reshape(1, shape[0], shape[1])
+        output = input_tensor.conv_1d(kernels=self.kernels, stride=self.stride, padding=self.padding)
         return output + self.bias
+    def parameters(self):
+        return [self.kernels, self.bias]
 class MSEloss(Module):
     
     def __init__(self):
