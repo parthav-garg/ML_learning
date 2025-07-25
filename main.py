@@ -79,12 +79,12 @@ class ECG_Conv_Model(Module):
 model = ECG_Conv_Model()
 criterion = CrossEntropyloss()
 # Using a smaller learning rate is often a good starting point for CNNs
-optim = optimizer.SGD(model, lr=0.001)
+optim = optimizer.Adam(model, lr=0.001)
 
 # ===================================================================
 # 4. TRAINING LOOP
 # ===================================================================
-epochs = 10 # Let's train for a few more epochs on this smaller dataset
+epochs = 20 # Let's train for a few more epochs on this smaller dataset
 
 for epoch in range(epochs):
     epoch_loss = 0.0
@@ -103,8 +103,6 @@ for epoch in range(epochs):
         optim.step()
         optim.zero_grad()
     
-    # Optional: decay learning rate
-    optim._lr *= 0.95
     print(f"Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss / len(data):.4f}")
 
 # ===================================================================

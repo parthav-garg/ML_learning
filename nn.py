@@ -34,7 +34,9 @@ class Linear(Module):
     def __init__(self, in_features, out_features):
         self._in = in_features
         self._out = out_features
-        self._w = Tensor(np.random.normal(0,.1, size=(in_features, out_features)))
+        fan_in = in_features
+        stddev = np.sqrt(2.0 / fan_in)
+        self._w = Tensor(np.random.normal(0,stddev, size=(in_features, out_features)))
         self._b = Tensor(np.zeros(out_features))
     def forward(self, input):
         """Forward pass, on the input data
@@ -67,7 +69,9 @@ class Conv1D(Module):
         self.kernel_size = kernel_size
         self.stride = stride
         self.padding = padding
-        self.kernels = Tensor(np.random.normal(0, .1, size=(out_channels, in_channels, kernel_size)))
+        fan_in = in_channels * kernel_size
+        stddev = np.sqrt(2.0 / fan_in)
+        self.kernels = Tensor(np.random.normal(0, stddev, size=(out_channels, in_channels, kernel_size)))
         self.bias = Tensor(np.zeros((1, out_channels, 1)))
     def forward(self, input_tensor):
         if len(input_tensor.get_shape()) < 3:
@@ -128,3 +132,32 @@ class optimizer():
         def zero_grad(self):
             for parameter in self._model.parameters():
                 parameter._grad = np.zeros_like(parameter._grad)
+                
+    class Adam():
+        def __init__(self, model, lr=.001, b1=.9, b2=.999, eps=1e-8):
+            self._model = model
+            self.lr = lr
+            self.beta1 = b1
+            self.beta2 = b2
+            self.eps = eps
+            self.m = {}
+            self.v = {}
+            for p in self._model.parameters():
+                self.m[p] = np.zeros_like(p._grad)
+                self.v[p] = np.zeros_like(p._grad)
+            self.t = 0
+        
+        def step(self):
+            self.t+= 1
+            for p in self._model.parameters():
+                self.m[p] = self.beta1 * self.m[p] + (1 - self.beta1) * p._grad
+                self.v[p] = self.beta2 * self.v[p] + (1 - self.beta2) * (p._grad ** 2)
+                m_t = self.m[p]/(np.ones_like(p._grad) - self.beta1)
+                v_t = self.v[p]/(np.ones_like(p._grad) - self.beta2)
+                p._data = p._data - self.lr * m_t/(np.sqrt(v_t) + self.eps)
+                
+        
+        def zero_grad(self):
+            for parameter in self._model.parameters():
+                parameter._grad = np.zeros_like(parameter._grad)
+                
