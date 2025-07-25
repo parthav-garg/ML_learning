@@ -5,7 +5,7 @@ from sklearn.model_selection import train_test_split
 
 # Assuming your files are in the same structure as before
 from base.tensor import Tensor
-from nn import Module, Linear, ReLU, CrossEntropyloss, optimizer
+from nn import Module, Linear, ReLU, CrossEntropyloss, optimizer, Dropout
 from DataLoader import DataLoader
 
 # ===================================================================
@@ -31,7 +31,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 num_classes = 10
 # One-hot encode the training labels
 y_train_one_hot = np.eye(num_classes)[y_train]
-
+y_test_one_hot = np.eye(num_classes)[y_test]
 print("Dataset loaded and prepared.")
 
 # ===================================================================
@@ -42,13 +42,14 @@ class MLP_Model(Module):
         super().__init__()
         # An MLP is just a sequence of Linear layers and activations
         self.fc1 = Linear(784, 128) # Input: 784 pixels, Hidden layer: 128 neurons
+        self.dropout = Dropout(p=.2)
         self.relu1 = ReLU()
         self.fc2 = Linear(128, num_classes) # Output: 10 neurons for 10 digits
 
     def forward(self, x):
         # No reshaping needed for MLP, input is already flat
         x = self.fc1(x)
-        x = self.relu1(x)
+        x = self.relu1(self.dropout(x))
         logits = self.fc2(x)
         return logits
 
@@ -97,31 +98,38 @@ BATCH_SIZE = 64
 data = DataLoader(X_train, y_train_one_hot, batch_size=BATCH_SIZE, shuffle=True)
 
 # --- Train with SGD ---
-print("\n--- TRAINING WITH SGD ---")
-sgd_model = MLP_Model()
-sgd_optimizer = optimizer.SGD(sgd_model, lr=LEARNING_RATE)
-sgd_losses = train_model(sgd_model, sgd_optimizer, data, epochs=EPOCHS)
+print("\n--- TRAINING WITH ADAM---")
+model = MLP_Model()
+optim = optimizer.Adam(model, lr=LEARNING_RATE)
+train_model(model,optim, data)
 
+print("\n--- EVALUATING MODEL ---")
+model.eval() # Make sure to set model to evaluation mode
 
-# --- Train with Adam ---
-print("\n--- TRAINING WITH ADAM ---")
-# CRITICAL: We must create a new model to reset the weights from scratch!
-adam_model = MLP_Model() 
-adam_optimizer = optimizer.Adam(adam_model, lr=LEARNING_RATE)
-adam_losses = train_model(adam_model, adam_optimizer, data, epochs=EPOCHS)
+# Use the test DataLoader you already created
+test_data = DataLoader(X_test, y_test_one_hot, batch_size=BATCH_SIZE, shuffle=False)
+correct_predictions = 0
+total_samples = 0
 
+# THIS IS THE CORRECT WAY TO ITERATE:
+# Use a standard `for` loop. It's cleaner and works perfectly with the DataLoader.
+for x_batch, y_batch in test_data:
+    
+    logits = model(x_batch)
+    shifted = logits - np.max(logits, axis=1, keepdims=True) #x(i) - max(x)
+    exp_shifted = np.exp(shifted) # e^(x(i) - max(x))
+    softmax_out = exp_shifted / np.sum(exp_shifted, axis=1, keepdims=True)
+    probs = softmax_out
+    
+    # Get the predicted class index for each item in the batch
+    predicted_classes = np.argmax(probs._data, axis=1)
+    # Get the true class index for each item in the batch
+    true_classes = np.argmax(y_batch, axis=1)
+    
+    # Add the number of correct predictions in this batch
+    correct_predictions += np.sum(predicted_classes == true_classes)
+    total_samples += len(x_batch)
 
-# ===================================================================
-# 5. PLOT THE RESULTS FOR COMPARISON
-# ===================================================================
-print("\nPlotting results...")
-plt.figure(figsize=(12, 7))
-plt.plot(range(1, EPOCHS + 1), sgd_losses, marker='o', linestyle='--', label='SGD Loss')
-plt.plot(range(1, EPOCHS + 1), adam_losses, marker='o', linestyle='-', label='Adam Loss')
-plt.title('Adam vs. SGD Optimizer Performance', fontsize=16)
-plt.xlabel('Epoch')
-plt.ylabel('Average Training Loss')
-plt.xticks(range(1, EPOCHS + 1))
-plt.legend()
-plt.grid(True)
-plt.show()
+# Calculate final accuracy
+accuracy = (correct_predictions / total_samples) * 100
+print(f"Accuracy on {total_samples} test samples = {accuracy:.2f}%")

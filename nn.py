@@ -28,7 +28,14 @@ class Module():
         for module in self._modules.values():
             params.extend(module.parameters())
         return params
-
+    def train(self):
+        for module in self._modules.values():
+            module.train()
+            
+    def eval(self):
+        for module in self._modules.values():
+            module.eval()
+        
 class Linear(Module):
     """Class to create a Linear Layere"""
     def __init__(self, in_features, out_features):
@@ -38,6 +45,7 @@ class Linear(Module):
         stddev = np.sqrt(2.0 / fan_in)
         self._w = Tensor(np.random.normal(0,stddev, size=(in_features, out_features)))
         self._b = Tensor(np.zeros(out_features))
+        self.training = True
     def forward(self, input):
         """Forward pass, on the input data
         Args:
@@ -45,22 +53,29 @@ class Linear(Module):
         Returns:
             Tensor: The output tensor of the calculation of inpput @ weights + biases.
         """
-        return (input @ self._w) + self._b
+        return (input @ self._w) + self._b if self.training else (input @ self._w._data) + self._b._data
     def layer_values(self):
         """Returns the weights, biases and the gradient tensor of the layer."""
         return {"weights" : self._w, "biases": self._b,"grad": self._w._grad}
     def parameters(self):
         """Returns the parameters of the layer."""
         return [self._w, self._b]
-
+    def train(self):
+        self.training = True
+    def eval(self):
+        self.training = False
 class ReLU(Module):
     def __init__(self):
         super().__init__()
+        self.training = False
 
     def forward(self, input_tensor):
         """Applies the ReLU activation function to the input tensor."""
-        return input_tensor.ReLU()
-
+        return input_tensor.ReLU() if self.training else np.maximum(0, input_tensor)
+    def train(self):
+        self.training = True
+    def eval(self):
+        self.training = False
 class Conv1D(Module):
     def __init__(self, in_channels, out_channels, kernel_size=1, stride=1, padding=0, batch_size=1):
         super().__init__()
@@ -73,14 +88,55 @@ class Conv1D(Module):
         stddev = np.sqrt(2.0 / fan_in)
         self.kernels = Tensor(np.random.normal(0, stddev, size=(out_channels, in_channels, kernel_size)))
         self.bias = Tensor(np.zeros((1, out_channels, 1)))
+        self.training = True
+        
     def forward(self, input_tensor):
         if len(input_tensor.get_shape()) < 3:
             shape = input_tensor.get_shape()
             input_tensor = input_tensor.reshape(1, shape[0], shape[1])
         output = input_tensor.conv_1d(kernels=self.kernels, stride=self.stride, padding=self.padding)
         return output + self.bias
+    
     def parameters(self):
         return [self.kernels, self.bias]
+    
+    def train(self):
+        self.training = True
+    
+    def eval(self):
+        self.training = False
+
+class Dropout(Module):
+    
+    def __init__(self, p=.2):
+        super().__init__()
+        if not (0.0 <= p <= 1.0):
+            raise ValueError("Dropout probablity must be between 0.0 and 1.0")
+        self.p = p
+        self.training = False
+        self.mask = 0
+    
+    def forward(self, input_tensor):
+        if not self.training:
+            return input_tensor
+        input_tensor = input_tensor if  isinstance(input_tensor, Tensor) else Tensor(input_tensor)
+        keep_prob = 1 - self.p
+        self.mask = np.random.binomial(1, keep_prob, size=input_tensor.get_shape()) / keep_prob
+        output_data = input_tensor._data * self.mask
+        c = Tensor(output_data, _prev=(input_tensor,))
+
+        def backward_fn():
+            input_tensor._grad += c._grad * self.mask
+            
+        c._backward = backward_fn
+        return c  
+    
+    def train(self):
+        self.training = True
+    
+    def eval(self):
+        self.training = False
+
 class MSEloss(Module):
     
     def __init__(self):
