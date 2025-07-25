@@ -1,126 +1,127 @@
+import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
-import numpy as np
+
+# Assuming your files are in the same structure as before
 from base.tensor import Tensor
-# Make sure to import your Conv1D class!
-from nn import Linear, CrossEntropyloss, optimizer, Module, ReLU, Conv1D
+from nn import Module, Linear, ReLU, CrossEntropyloss, optimizer
 from DataLoader import DataLoader
 
 # ===================================================================
-# 1. LOAD THE 1D-FRIENDLY ECG5000 DATASET
+# 1. LOAD THE MNIST DATASET
 # ===================================================================
-# Fetch the data
-ecg = fetch_openml('ECG5000', version=1, as_frame=False)
+print("Loading MNIST dataset...")
+# MNIST is a dataset of 28x28 images of handwritten digits (0-9)
+mnist = fetch_openml('mnist_784', version=1, as_frame=False, parser='auto')
 
-# The data is in 'data', labels in 'target'
-X = ecg['data'].astype(np.float64)
-y = ecg['target'].astype(int)
+# The data is 70,000 images, each flattened to 784 pixels (28*28)
+X = mnist['data'].astype(np.float64)
+# Labels are strings '0' through '9', convert them to integers
+y = mnist['target'].astype(int)
 
-# --- Important: The labels are 1-5, we need them to be 0-4 ---
-y = y - 1
+# Normalize pixel values from 0-255 to 0-1 for better training stability
+X /= 255.0
 
-# Split the data into training and testing sets
+# Split into training and a smaller test set for faster execution
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
+    X, y, test_size=0.15, random_state=42, stratify=y
 )
 
-num_classes = 5
+num_classes = 10
+# One-hot encode the training labels
 y_train_one_hot = np.eye(num_classes)[y_train]
 
-# Use your excellent DataLoader
-data = DataLoader(X_train, y_train_one_hot, batch_size=32, shuffle=True)
-num_train_samples = X_train.shape[0]
-num_test_samples = X_test.shape[0]
+print("Dataset loaded and prepared.")
 
 # ===================================================================
-# 2. DEFINE A CONV MODEL SUITABLE FOR THE ECG DATA
+# 2. DEFINE A SIMPLE MLP MODEL FOR FASTER TRAINING
 # ===================================================================
-class ECG_Conv_Model(Module):
+class MLP_Model(Module):
     def __init__(self):
         super().__init__()
-        # Each ECG signal has 140 time steps and 1 channel.
-
-        # Layer 1: Takes 1 input channel, produces 16 feature maps.
-        # Padding 'same' equivalent: padding = (kernel_size - 1) // 2 = (5-1)//2 = 2
-        self.conv1 = Conv1D(in_channels=1, out_channels=16, kernel_size=5, stride=1, padding=2)
+        # An MLP is just a sequence of Linear layers and activations
+        self.fc1 = Linear(784, 128) # Input: 784 pixels, Hidden layer: 128 neurons
         self.relu1 = ReLU()
-
-        # Layer 2: Takes the 16 feature maps, produces 32 new ones.
-        # Padding 'same' equivalent: padding = (3-1)//2 = 1
-        self.conv2 = Conv1D(in_channels=16, out_channels=32, kernel_size=3, stride=1, padding=1)
-        self.relu2 = ReLU()
-
-        # After convolutions, the output shape is (batch_size, 32, 140).
-        # We flatten this for the final linear layer.
-        self.fc1 = Linear(32 * 140, num_classes)
+        self.fc2 = Linear(128, num_classes) # Output: 10 neurons for 10 digits
 
     def forward(self, x):
-        batch_size = x.get_shape()[0]
-
-        # 1. Reshape input from (batch, 140) to (batch, 1, 140) for Conv1D
-        x = x.reshape(batch_size, 1, 140)
-
-        # 2. Pass through conv layers
-        x = self.conv1(x)
+        # No reshaping needed for MLP, input is already flat
+        x = self.fc1(x)
         x = self.relu1(x)
-        x = self.conv2(x)
-        x = self.relu2(x)
-
-        # 3. Flatten the output for the linear layer
-        x = x.reshape(batch_size, 32 * 140)
-
-        # 4. Final classification layer
-        logits = self.fc1(x)
+        logits = self.fc2(x)
         return logits
 
 # ===================================================================
-# 3. INSTANTIATE MODEL, LOSS, AND OPTIMIZER
+# 3. HELPER FUNCTION FOR THE TRAINING LOOP
 # ===================================================================
-model = ECG_Conv_Model()
-criterion = CrossEntropyloss()
-# Using a smaller learning rate is often a good starting point for CNNs
-optim = optimizer.Adam(model, lr=0.001)
-
-# ===================================================================
-# 4. TRAINING LOOP
-# ===================================================================
-epochs = 20 # Let's train for a few more epochs on this smaller dataset
-
-for epoch in range(epochs):
-    epoch_loss = 0.0
-    for x_batch, y_batch in data:
-        x_tensor = Tensor(x_batch)
-        y_tensor = Tensor(y_batch)
-
-        # --- FORWARD PASS ---
-        logits = model(x_tensor)
-        
-        # --- LOSS AND BACKWARD ---
-        probs = logits.softmax()
-        loss = criterion(probs, y_tensor)
-        epoch_loss += loss._data
-        loss.backward()
-        optim.step()
-        optim.zero_grad()
+def train_model(model, optim, data_loader, epochs=10):
+    """A helper function to run the training loop and record losses."""
+    criterion = CrossEntropyloss()
+    epoch_losses = []
     
-    print(f"Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss / len(data):.4f}")
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        for x_batch, y_batch in data_loader:
+            x_tensor = Tensor(x_batch)
+            y_tensor = Tensor(y_batch)
+
+            # --- FORWARD PASS ---
+            logits = model(x_tensor)
+            
+            # --- LOSS AND BACKWARD ---
+            probs = logits.softmax()
+            loss = criterion(probs, y_tensor)
+            epoch_loss += loss._data
+            
+            loss.backward()
+            optim.step()
+            optim.zero_grad()
+        
+        avg_epoch_loss = epoch_loss / len(data_loader)
+        epoch_losses.append(avg_epoch_loss)
+        # Use the optimizer's class name for a clean print statement
+        print(f"[{optim.__class__.__name__}] Epoch {epoch + 1}/{epochs}, Loss: {avg_epoch_loss:.4f}")
+        
+    return epoch_losses
 
 # ===================================================================
-# 5. EVALUATION LOOP
+# 4. RUN THE COMPARISON EXPERIMENT
 # ===================================================================
-print("\nStarting evaluation on the unseen test set...")
-correct = 0
-# Create a test DataLoader for easier batching
-test_data = DataLoader(X_test, np.eye(num_classes)[y_test], batch_size=32)
+# Hyperparameters for the experiment
+LEARNING_RATE = 0.001
+EPOCHS = 10
+BATCH_SIZE = 64
 
-for x_batch, y_batch_one_hot in test_data:
-    x_tensor = Tensor(x_batch)
-    y_batch_labels = np.argmax(y_batch_one_hot, axis=1) # Get original labels
+# Create the data loader
+data = DataLoader(X_train, y_train_one_hot, batch_size=BATCH_SIZE, shuffle=True)
 
-    logits = model(x_tensor)
-    probs = logits.softmax()
-    preds = np.argmax(probs._data, axis=1)
-    correct += np.sum(preds == y_batch_labels)
+# --- Train with SGD ---
+print("\n--- TRAINING WITH SGD ---")
+sgd_model = MLP_Model()
+sgd_optimizer = optimizer.SGD(sgd_model, lr=LEARNING_RATE)
+sgd_losses = train_model(sgd_model, sgd_optimizer, data, epochs=EPOCHS)
 
-accuracy = (correct / num_test_samples) * 100
-print(f"\nAccuracy on {num_test_samples} unseen test samples: {accuracy:.2f}%")
+
+# --- Train with Adam ---
+print("\n--- TRAINING WITH ADAM ---")
+# CRITICAL: We must create a new model to reset the weights from scratch!
+adam_model = MLP_Model() 
+adam_optimizer = optimizer.Adam(adam_model, lr=LEARNING_RATE)
+adam_losses = train_model(adam_model, adam_optimizer, data, epochs=EPOCHS)
+
+
+# ===================================================================
+# 5. PLOT THE RESULTS FOR COMPARISON
+# ===================================================================
+print("\nPlotting results...")
+plt.figure(figsize=(12, 7))
+plt.plot(range(1, EPOCHS + 1), sgd_losses, marker='o', linestyle='--', label='SGD Loss')
+plt.plot(range(1, EPOCHS + 1), adam_losses, marker='o', linestyle='-', label='Adam Loss')
+plt.title('Adam vs. SGD Optimizer Performance', fontsize=16)
+plt.xlabel('Epoch')
+plt.ylabel('Average Training Loss')
+plt.xticks(range(1, EPOCHS + 1))
+plt.legend()
+plt.grid(True)
+plt.show()

@@ -13,15 +13,20 @@ A custom-built deep learning framework from scratch in Python and NumPy, demonst
         *   `ReLU`: Rectified Linear Unit activation function.
         *   `Conv1D`: **1D Convolutional Layer** with support for custom kernel sizes, strides, and padding.
 *   **Loss Functions:** Includes `MSELoss` (Mean Squared Error) and `CrossEntropyLoss` for various learning tasks.
-*   **Optimizers:** Features a basic `SGD` (Stochastic Gradient Descent) optimizer for parameter updates.
+*   **Optimizers:** Features a basic `SGD` (Stochastic Gradient Descent) and also a better `Adam` optimiser for parameter updates.
 *   **Data Handling:** Custom `DataLoader` for efficient batching and shuffling of datasets.
 
 ## Structure
 ├── base
+
 └── tensor.py # Core Tensor class with autograd operations and backward definitions
+
 ├── nn.py # Neural Network module definitions (Module, Linear, ReLU, Conv1D, Losses, Optimizer)
+
 ├── DataLoader.py # Custom DataLoader for batching and shuffling data
+
 └── main.py # Example script for training and evaluating models (MNIST/ECG5000)
+
 
 ## Installation
 ```bash
@@ -31,6 +36,5 @@ A custom-built deep learning framework from scratch in Python and NumPy, demonst
 ## Future Enhancements
 
 *   Implement `Conv2D` and `MaxPool` layers.
-*   Add more optimizers (e.g., Adam, RMSprop).
 *   Extend supported tensor operations (e.g., broadcasting for more complex ops).
 *   Integrate GPU acceleration (e.g., via a custom C++/CUDA backend).
