@@ -152,8 +152,8 @@ class optimizer():
             for p in self._model.parameters():
                 self.m[p] = self.beta1 * self.m[p] + (1 - self.beta1) * p._grad
                 self.v[p] = self.beta2 * self.v[p] + (1 - self.beta2) * (p._grad ** 2)
-                m_t = self.m[p]/(np.ones_like(p._grad) - self.beta1)
-                v_t = self.v[p]/(np.ones_like(p._grad) - self.beta2)
+                m_t = self.m[p]/(1 - self.beta1 ** self.t)
+                v_t = self.v[p]/(1 - self.beta2 ** self.t)
                 p._data = p._data - self.lr * m_t/(np.sqrt(v_t) + self.eps)
                 
         
