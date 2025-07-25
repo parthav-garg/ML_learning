@@ -17,16 +17,16 @@ A custom-built deep learning framework from scratch in Python and NumPy, demonst
 *   **Data Handling:** Custom `DataLoader` for efficient batching and shuffling of datasets.
 
 ## Structure
-├── base/
-│ └── tensor.py # Core Tensor class with autograd operations and backward definitions
+├── base
+└── tensor.py # Core Tensor class with autograd operations and backward definitions
 ├── nn.py # Neural Network module definitions (Module, Linear, ReLU, Conv1D, Losses, Optimizer)
 ├── DataLoader.py # Custom DataLoader for batching and shuffling data
 └── main.py # Example script for training and evaluating models (MNIST/ECG5000)
 
 ## Installation
-   ```bash
+```bash
     pip install -r requirements.txt
-    ```
+```
 
 ## Future Enhancements
 
