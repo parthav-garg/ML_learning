@@ -1,6 +1,6 @@
 import numpy as np
 from base.tensor import Tensor
-
+from numpy.lib.stride_tricks import sliding_window_view
 class Module():
 
     def __init__(self):
@@ -71,7 +71,8 @@ class ReLU(Module):
 
     def forward(self, input_tensor):
         """Applies the ReLU activation function to the input tensor."""
-        return input_tensor.ReLU() if self.training else np.maximum(0, input_tensor)
+        input_tensor = input_tensor if isinstance(input_tensor, Tensor) else Tensor(input_tensor)
+        return input_tensor.ReLU()
     def train(self):
         self.training = True
     def eval(self):
@@ -91,10 +92,47 @@ class Conv1D(Module):
         self.training = True
         
     def forward(self, input_tensor):
-        if len(input_tensor.get_shape()) < 3:
-            shape = input_tensor.get_shape()
+        if len(input_tensor.shape) < 3:
+            shape = input_tensor.shape
             input_tensor = input_tensor.reshape(1, shape[0], shape[1])
-        output = input_tensor.conv_1d(kernels=self.kernels, stride=self.stride, padding=self.padding)
+        if self.padding > 0:
+            input_tensor = input_tensor if isinstance(input_tensor, Tensor) else Tensor(input_tensor)
+            padded_data = Tensor.pad_1d(input_tensor, self.padding, dims=[2])
+        else:
+            padded_data = input_tensor if isinstance(input_tensor, Tensor) else Tensor(input_tensor)
+        S = self.stride
+        B, in_C, L = padded_data.shape
+        out_C, _, K = self.kernels.shape
+        Lout = (L - K) // S + 1
+        windows = sliding_window_view(padded_data._data, window_shape=K, axis=(2))
+        in_unroll = windows.transpose(0, 2, 1, 3).reshape(B, Lout, in_C * K)
+        k_flat = self.kernels._data.reshape(out_C, in_C * K)
+        output = (in_unroll @ k_flat.T).reshape(B, out_C, Lout)
+        if not self.training:
+            return output + self.bias._data
+        output = Tensor(output, _prev=(input_tensor, self.kernels))
+        def backward_fn():
+            self.kernels._grad += (output._grad.transpose(0, 2, 1) 
+                       .reshape(B * Lout, out_C).T 
+                       @ in_unroll.reshape(B * Lout, in_C * K) 
+                      ).reshape(out_C, in_C, K)
+            grad_unroll = output._grad.transpose(0, 2, 1).reshape(B * Lout, out_C) @ k_flat  # (B*Lout, in_C * K)
+            grad_unroll = grad_unroll.reshape(B, Lout, in_C, K).transpose(0, 2, 3, 1)  # (B, in_C, K, Lout)
+
+            # Fold back into input shape
+            dx_padded = np.zeros_like(padded_data._data)
+            for k in range(K):
+                idx = np.arange(Lout) * S + k
+                dx_padded[:, :, idx] += grad_unroll[:, :, k, :]
+
+            # If padded, remove it
+            if self.padding > 0:
+                padded_data._grad += dx_padded
+                padded_data._backward()
+            else:
+                input_tensor._grad += dx_padded
+                    
+        output._backward = backward_fn
         return output + self.bias
     
     def parameters(self):
@@ -105,6 +143,9 @@ class Conv1D(Module):
     
     def eval(self):
         self.training = False
+
+class MaxPool1D(Module):
+    def __init__(self):
 
 class Dropout(Module):
     

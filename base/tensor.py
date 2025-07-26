@@ -27,7 +27,8 @@ class Tensor:
         self._prev = set(_prev)
         self._backward = lambda: None
         self._grad = np.zeros_like(self._data)
-        
+        self.shape = self._data.shape
+        self.ndim = self._data.ndim
     def __add__(self, other):
         """Adds two tensors.
 
@@ -363,23 +364,19 @@ class Tensor:
             end = start + kernel_size
             window = padded_data[:, :, start:end]
             ccr = (window.reshape(batch_size, 1, in_channels, kernel_size) * kernels.reshape(1, out_channels, in_channels, kernel_size)).sum(axis=(2, 3))
-            #tensor_comp.append(ccr)
+            tensor_comp.append(ccr)
             np_outputs[:, :, i] = ccr._data
 
         parents = {self, kernels}
         c = Tensor(np_outputs, _prev=parents)
         
         def backward_fn():
-            flipped_kernel = np.flip(kernels._data, axis=(0,1))
             for i in range(output_length):
-                #tensor = tensor_comp[i]
-                #grad_slice = c._grad[: , : , i]
-                #tensor._grad += grad_slice.reshape(tensor.get_shape())
-                #tensor._backward()
-                start = i * stride
-                end = start + kernel_size
-                window = padded_data[:, :, start:end]
-                kernels._grad += window * c._grad
+                tensor = tensor_comp[i]
+                grad_slice = c._grad[: , : , i]
+                tensor._grad += grad_slice.reshape(tensor.get_shape())
+                tensor._backward()
+
                 
         
         c._backward = backward_fn
