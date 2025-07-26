@@ -363,22 +363,68 @@ class Tensor:
             end = start + kernel_size
             window = padded_data[:, :, start:end]
             ccr = (window.reshape(batch_size, 1, in_channels, kernel_size) * kernels.reshape(1, out_channels, in_channels, kernel_size)).sum(axis=(2, 3))
-            tensor_comp.append(ccr)
+            #tensor_comp.append(ccr)
             np_outputs[:, :, i] = ccr._data
 
         parents = {self, kernels}
         c = Tensor(np_outputs, _prev=parents)
         
         def backward_fn():
+            flipped_kernel = np.flip(kernels._data, axis=(0,1))
             for i in range(output_length):
-                tensor = tensor_comp[i]
-                grad_slice = c._grad[: , : , i]
-                tensor._grad += grad_slice.reshape(tensor.get_shape())
-                tensor._backward()
+                #tensor = tensor_comp[i]
+                #grad_slice = c._grad[: , : , i]
+                #tensor._grad += grad_slice.reshape(tensor.get_shape())
+                #tensor._backward()
+                start = i * stride
+                end = start + kernel_size
+                window = padded_data[:, :, start:end]
+                kernels._grad += window * c._grad
+                
         
         c._backward = backward_fn
         return c
     
+    def conv_2d(self, kernels, stride=(1, 1), padding=(0, 0)):
+        
+        if padding[0] > 0  or padding[1] > 0:
+            padded_data = self.pad_1d(padding[0], dims=[2])
+            padded_data = self.pad_1d(padding[1], dims=[3])  
+
+        else:
+            padded_data = self
+        
+        batch_size, in_channels, height, width = padded_data.get_shape()
+        out_channels, _, kernel_height, kernel_width = kernels.get_shape()
+        h_out = height - kernel_height // stride[0] + 1
+        w_out = width - kernel_width // stride[1] + 1
+        np_outputs = np.zeros((batch_size, out_channels, h_out, w_out))
+        tensor_comp = []
+        
+        for i in range(h_out):
+            tensor_comp_i = []
+            h_start = i * stride[0]
+            h_end = h_start + kernel_height
+            for j in range(w_out):
+                w_start = j * stride[1]
+                w_end = w_start + kernel_width
+                window = padded_data[:, :, h_start: h_end, w_start:w_end]
+                ccr = (window.reshape(batch_size, 1, in_channels, kernel_height, kernel_width) * kernels.reshape(1, out_channels, in_channels, kernel_height, kernel_width)).sum(axis=(2, 3, 4))
+                #tensor_comp_i.append(ccr)
+                np_outputs[:, :, i, j] = ccr._data
+            tensor_comp.append(tensor_comp_i)
+        parents = {self, kernels}
+        c = Tensor(np_outputs, _prev=parents)
+        def backward_fn():
+            for i in range(h_out):
+                for j in range(w_out):
+                    tensor = tensor_comp[i][j]
+                    grad_slice = c._grad[: , : , i, j]
+                    tensor._grad += grad_slice.reshape(tensor.get_shape())
+                    tensor._backward()
+            
+        c._backward = backward_fn
+        return c
     def backward(self):
         """Computes the backward pass for the tensor.
         """
