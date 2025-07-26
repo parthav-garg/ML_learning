@@ -78,7 +78,7 @@ class ReLU(Module):
     def eval(self):
         self.training = False
 class Conv1D(Module):
-    def __init__(self, in_channels, out_channels, kernel_size=1, stride=1, padding=0, batch_size=1):
+    def __init__(self, in_channels, out_channels, kernel_size=1, stride=1, padding=0):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -145,8 +145,46 @@ class Conv1D(Module):
         self.training = False
 
 class MaxPool1D(Module):
-    def __init__(self):
+    def __init__(self, kernel_size=1,padding=0, stride=1):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+    def forward(self, input_tensor):
+        input_tensor = input_tensor if isinstance(input_tensor, Tensor) else Tensor(input_tensor)
+        if self.padding > 0:
+            padded_data = Tensor.pad_1d(input_tensor, self.padding, dims=[2])   
+        else:
+            padded_data = input_tensor
+            
+        B, C, L = padded_data.shape
+        K = self.kernel_size
+        S = self.stride
+        Lout = (L - K) // S + 1
+        windows = sliding_window_view(padded_data._data, window_shape=K, axis=(2))
+        windows = windows[:, :, ::S, :]
+        out = windows.max(axis=3)
+        #print(out.shape)
+        indices = windows.argmax(axis=3)
+        out = Tensor(out, _prev=(padded_data,))
+        def backward_fn():
+            grad = out._grad  # (B, C, L_out)
+            B_idx, C_idx, L_out_idx = np.meshgrid(
+                np.arange(B), np.arange(C), np.arange(Lout), indexing='ij'
+            )
 
+            L_idx = L_out_idx * S + indices  # convert window offset to original indices
+
+            if padded_data._grad is None:
+                padded_data._grad = np.zeros_like(padded_data._data)
+
+            np.add.at(padded_data._grad, (B_idx, C_idx, L_idx), grad)
+            padded_data._backward()
+        out._backward = backward_fn
+        return out
+    
+    def parameters(self):
+        return []
 class Dropout(Module):
     
     def __init__(self, p=.2):

@@ -1,40 +1,41 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from tslearn.datasets import UCR_UEA_datasets
+from sklearn.datasets import fetch_openml
 from sklearn.model_selection import train_test_split
-
+from sklearn.preprocessing import LabelEncoder
 from base.tensor import Tensor
-from nn import Module, Conv1D, ReLU, Linear, CrossEntropyloss, optimizer, Dropout
+from nn import Module, Conv1D, ReLU, MaxPool1D, Linear, Dropout, CrossEntropyloss, optimizer
 from DataLoader import DataLoader
-
+import matplotlib.pyplot as plt
 # ================================================================
-# 1. Load ECG5000 Dataset (1D time series)
+# 1. Load ECG5000 Dataset (1D time series) from OpenML
 # ================================================================
-print("Loading ECG5000 dataset...")
-ucr = UCR_UEA_datasets()
-X, y, _, _ = ucr.load_dataset("ECG5000")
+print("Loading ECG5000 dataset from OpenML...")
 
-# Normalize
-X = X.astype(np.float64)
+ecg = fetch_openml('ECG5000', version=1, as_frame=False, parser='auto')
+
+X = ecg['data'].astype(np.float64)          # shape: (5000, 140)
+y = ecg['target']                           # string labels: '1' to '5'
+
+# Encode string labels to integer class IDs (0–4)
+le = LabelEncoder()
+y = le.fit_transform(y)                     # e.g., '1' → 0, ..., '5' → 4
+num_classes = len(np.unique(y))
+
+# Normalize X
 X -= X.mean()
 X /= X.std()
 
-# Labels: make zero-based (e.g., 0 to 4)
-y = y.astype(int)
-y -= y.min()
-num_classes = len(np.unique(y))
-
-# Reshape to (B, 1, T)
-X = X.reshape((X.shape[0], 1, X.shape[1]))
+# Reshape to (B, 1, T) for Conv1D (B=batch, C=1 channel, T=time)
+X = X.reshape((X.shape[0], 1, X.shape[1]))  # shape: (5000, 1, 140)
 
 # One-hot encode targets
-y_one_hot = np.eye(num_classes)[y]
+y_one_hot = np.eye(num_classes)[y]         # shape: (5000, 5)
 
 # Train/test split
 X_train, X_test, y_train, y_test = train_test_split(
     X, y_one_hot, test_size=0.2, random_state=42, stratify=y
 )
-
+print(X_train.shape, y_train.shape)
 print("ECG5000 dataset loaded.")
 
 # ================================================================
@@ -46,8 +47,10 @@ class CNN1D_Model(Module):
         self.conv1 = Conv1D(in_channels=1, out_channels=32, kernel_size=5, stride=1, padding=2)
         self.relu1 = ReLU()
         self.dropout1 = Dropout(p=0.1)
-
-
+        self.maxpool1 = MaxPool1D(kernel_size=2, stride=2)
+        self.conv2 = Conv1D(in_channels=32, out_channels=64, kernel_size=5, stride=1, padding=2)
+        self.relu2 = ReLU()
+        self.dropout2 = Dropout(p=0.1)
         self.flatten_dim = 32 * 140  # length remains 140
         self.fc1 = Linear(self.flatten_dim, 256)
         self.relu4 = ReLU()
@@ -56,14 +59,18 @@ class CNN1D_Model(Module):
 
     def forward(self, x):
         x = self.conv1(x)
-        x = self.relu1(x)
+        #print("conv1 shape= ", x.shape)
+        x = self.relu1(x)  
         x = self.dropout1(x)
-
-        x = x.reshape(x.shape[0], -1)  # flatten
+        x = self.maxpool1(x)
+        x = self.conv2(x)
+        x = self.relu2(x)
+        x = self.dropout2(x)
+        x = x.reshape(x.shape[0], -1)
         x = self.fc1(x)
         x = self.relu4(x)
         x = self.dropout4(x)
-
+        x = x.reshape(x.shape[0], -1)
         return self.fc2(x)
 # ================================================================
 # 3. Training Loop
@@ -119,19 +126,24 @@ plt.grid(True)
 # ================================================================
 # 6. Evaluate on Test Set
 # ================================================================
-def evaluate_model(model, X_test, y_test):
+def evaluate_model(model, dataloader):
     model.eval()
-    x_tensor = X_test
-    y_tensor = y_test
+    correct = 0
+    total = 0
+    for x_batch, y_batch in dataloader:
 
-    logits = model(x_tensor)
-    preds = logits.softmax()._data.argmax(axis=1)
-    targets = y_test.argmax(axis=1)
+        logits = model(x_batch)
+        preds = logits.softmax()._data.argmax(axis=1)
+        targets = y_batch.argmax(axis=1)
 
-    accuracy = (preds == targets).mean()
-    print(f"Final Test Accuracy: {accuracy * 100:.5f}%")
+        correct += np.sum(preds == targets, dtype=np.float64)
+        total += len(x_batch)
+
+    accuracy = (correct / total) * 100
+    print(f"Final Test Accuracy: {accuracy:.5f}%")
     return accuracy
 
 print("\n--- EVALUATING ON TEST SET ---")
-evaluate_model(model, X_test, y_test)
+data = DataLoader(X_test, y_test, batch_size=BATCH_SIZE, shuffle=False)
+evaluate_model(model, data)
 plt.show()
