@@ -123,19 +123,15 @@ class Conv1D(Module):
 
             dx_padded = np.zeros_like(padded_data._data)
 
-            # This is a more stable way to "scatter" the gradients back
             for i in range(Lout):
                 for j in range(K):
                     start = i * S
                     dx_padded[:, :, start + j] += grad_unroll[:, :, i, j]
 
-
-            # If padded, propagate gradient to the padding operation
             if self.padding > 0:
                 padded_data._grad += dx_padded
                 padded_data._backward()
             else:
-                # Otherwise, directly to the input tensor
                 input_tensor._grad += dx_padded
                     
         output._backward = backward_fn
