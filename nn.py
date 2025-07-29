@@ -1,6 +1,6 @@
 import numpy as np
 from base.tensor import Tensor
-
+from numpy.lib.stride_tricks import sliding_window_view
 class Module():
 
     def __init__(self):
@@ -71,13 +71,14 @@ class ReLU(Module):
 
     def forward(self, input_tensor):
         """Applies the ReLU activation function to the input tensor."""
-        return input_tensor.ReLU() if self.training else np.maximum(0, input_tensor)
+        input_tensor = input_tensor if isinstance(input_tensor, Tensor) else Tensor(input_tensor)
+        return input_tensor.ReLU()
     def train(self):
         self.training = True
     def eval(self):
         self.training = False
 class Conv1D(Module):
-    def __init__(self, in_channels, out_channels, kernel_size=1, stride=1, padding=0, batch_size=1):
+    def __init__(self, in_channels, out_channels, kernel_size=1, stride=1, padding=0):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -91,10 +92,53 @@ class Conv1D(Module):
         self.training = True
         
     def forward(self, input_tensor):
-        if len(input_tensor.get_shape()) < 3:
-            shape = input_tensor.get_shape()
+        if len(input_tensor.shape) < 3:
+            shape = input_tensor.shape
             input_tensor = input_tensor.reshape(1, shape[0], shape[1])
-        output = input_tensor.conv_1d(kernels=self.kernels, stride=self.stride, padding=self.padding)
+        if self.padding > 0:
+            input_tensor = input_tensor if isinstance(input_tensor, Tensor) else Tensor(input_tensor)
+            padded_data = Tensor.pad_1d(input_tensor, self.padding, dims=[2])
+        else:
+            padded_data = input_tensor if isinstance(input_tensor, Tensor) else Tensor(input_tensor)
+        S = self.stride
+        B, in_C, L = padded_data.shape
+        out_C, _, K = self.kernels.shape
+        Lout = (L - K) // S + 1
+        windows = sliding_window_view(padded_data._data, window_shape=K, axis=(2))
+        in_unroll = windows.transpose(0, 2, 1, 3).reshape(B, Lout, in_C * K)
+        k_flat = self.kernels._data.reshape(out_C, in_C * K)
+        output = (in_unroll @ k_flat.T).reshape(B, out_C, Lout)
+        if not self.training:
+            return output + self.bias._data
+        output = Tensor(output, _prev=(input_tensor, self.kernels))
+        def backward_fn():
+            self.kernels._grad += (output._grad.transpose(0, 2, 1) 
+                       .reshape(B * Lout, out_C).T 
+                       @ in_unroll.reshape(B * Lout, in_C * K) 
+                      ).reshape(out_C, in_C, K)
+            grad_unroll = (
+                output._grad.transpose(0, 2, 1).reshape(B * Lout, out_C) @ k_flat
+            )  # Result shape: (B*Lout, in_C*K)
+            grad_unroll = grad_unroll.reshape(B, Lout, in_C, K).transpose(0, 2, 1, 3) # (B, in_C, Lout, K)
+
+            dx_padded = np.zeros_like(padded_data._data)
+
+            # This is a more stable way to "scatter" the gradients back
+            for i in range(Lout):
+                for j in range(K):
+                    start = i * S
+                    dx_padded[:, :, start + j] += grad_unroll[:, :, i, j]
+
+
+            # If padded, propagate gradient to the padding operation
+            if self.padding > 0:
+                padded_data._grad += dx_padded
+                padded_data._backward()
+            else:
+                # Otherwise, directly to the input tensor
+                input_tensor._grad += dx_padded
+                    
+        output._backward = backward_fn
         return output + self.bias
     
     def parameters(self):
@@ -106,6 +150,48 @@ class Conv1D(Module):
     def eval(self):
         self.training = False
 
+class MaxPool1D(Module):
+    def __init__(self, kernel_size=1,padding=0, stride=1):
+        super().__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+    def forward(self, input_tensor):
+        input_tensor = input_tensor if isinstance(input_tensor, Tensor) else Tensor(input_tensor)
+        if self.padding > 0:
+            padded_data = Tensor.pad_1d(input_tensor, self.padding, dims=[2])   
+        else:
+            padded_data = input_tensor
+            
+        B, C, L = padded_data.shape
+        K = self.kernel_size
+        S = self.stride
+        Lout = (L - K) // S + 1
+        windows = sliding_window_view(padded_data._data, window_shape=K, axis=(2))
+        windows = windows[:, :, ::S, :]
+        out = windows.max(axis=3)
+        #print(out.shape)
+        indices = windows.argmax(axis=3)
+        out = Tensor(out, _prev=(padded_data,))
+        def backward_fn():
+            grad = out._grad  # (B, C, L_out)
+    
+            B_idx, C_idx, L_out_idx = np.meshgrid(
+                np.arange(B), np.arange(C), np.arange(Lout), indexing='ij'
+            )
+            
+            L_idx = L_out_idx * S + indices  # convert window offset to original indices
+            
+            if padded_data._grad is None:
+                padded_data._grad = np.zeros_like(padded_data._data)
+            # Use advanced indexing to accumulate gradients
+            np.add.at(padded_data._grad, (B_idx, C_idx, L_idx), grad)
+            padded_data._backward()
+        out._backward = backward_fn
+        return out
+    
+    def parameters(self):
+        return []
 class Dropout(Module):
     
     def __init__(self, p=.2):
@@ -121,12 +207,12 @@ class Dropout(Module):
             return input_tensor
         input_tensor = input_tensor if  isinstance(input_tensor, Tensor) else Tensor(input_tensor)
         keep_prob = 1 - self.p
-        self.mask = np.random.binomial(1, keep_prob, size=input_tensor.get_shape()) / keep_prob
-        output_data = input_tensor._data * self.mask
+        mask = np.random.binomial(1, keep_prob, size=input_tensor.get_shape()) / keep_prob
+        output_data = input_tensor._data * mask
         c = Tensor(output_data, _prev=(input_tensor,))
 
         def backward_fn():
-            input_tensor._grad += c._grad * self.mask
+            input_tensor._grad += c._grad * mask
             
         c._backward = backward_fn
         return c  
@@ -206,6 +292,9 @@ class optimizer():
         def step(self):
             self.t+= 1
             for p in self._model.parameters():
+                grad_norm = np.linalg.norm(p._grad)
+                if grad_norm > 1.0:  # threshold
+                    p._grad = p._grad / grad_norm
                 self.m[p] = self.beta1 * self.m[p] + (1 - self.beta1) * p._grad
                 self.v[p] = self.beta2 * self.v[p] + (1 - self.beta2) * (p._grad ** 2)
                 m_t = self.m[p]/(1 - self.beta1 ** self.t)
