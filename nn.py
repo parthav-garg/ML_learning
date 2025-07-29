@@ -116,20 +116,26 @@ class Conv1D(Module):
                        .reshape(B * Lout, out_C).T 
                        @ in_unroll.reshape(B * Lout, in_C * K) 
                       ).reshape(out_C, in_C, K)
-            grad_unroll = output._grad.transpose(0, 2, 1).reshape(B * Lout, out_C) @ k_flat  # (B*Lout, in_C * K)
-            grad_unroll = grad_unroll.reshape(B, Lout, in_C, K).transpose(0, 2, 3, 1)  # (B, in_C, K, Lout)
+            grad_unroll = (
+                output._grad.transpose(0, 2, 1).reshape(B * Lout, out_C) @ k_flat
+            )  # Result shape: (B*Lout, in_C*K)
+            grad_unroll = grad_unroll.reshape(B, Lout, in_C, K).transpose(0, 2, 1, 3) # (B, in_C, Lout, K)
 
-            # Fold back into input shape
             dx_padded = np.zeros_like(padded_data._data)
-            for k in range(K):
-                idx = np.arange(Lout) * S + k
-                dx_padded[:, :, idx] += grad_unroll[:, :, k, :]
 
-            # If padded, remove it
+            # This is a more stable way to "scatter" the gradients back
+            for i in range(Lout):
+                for j in range(K):
+                    start = i * S
+                    dx_padded[:, :, start + j] += grad_unroll[:, :, i, j]
+
+
+            # If padded, propagate gradient to the padding operation
             if self.padding > 0:
                 padded_data._grad += dx_padded
                 padded_data._backward()
             else:
+                # Otherwise, directly to the input tensor
                 input_tensor._grad += dx_padded
                     
         output._backward = backward_fn
@@ -169,15 +175,16 @@ class MaxPool1D(Module):
         out = Tensor(out, _prev=(padded_data,))
         def backward_fn():
             grad = out._grad  # (B, C, L_out)
+    
             B_idx, C_idx, L_out_idx = np.meshgrid(
                 np.arange(B), np.arange(C), np.arange(Lout), indexing='ij'
             )
-
+            
             L_idx = L_out_idx * S + indices  # convert window offset to original indices
-
+            
             if padded_data._grad is None:
                 padded_data._grad = np.zeros_like(padded_data._data)
-
+            # Use advanced indexing to accumulate gradients
             np.add.at(padded_data._grad, (B_idx, C_idx, L_idx), grad)
             padded_data._backward()
         out._backward = backward_fn
@@ -200,12 +207,12 @@ class Dropout(Module):
             return input_tensor
         input_tensor = input_tensor if  isinstance(input_tensor, Tensor) else Tensor(input_tensor)
         keep_prob = 1 - self.p
-        self.mask = np.random.binomial(1, keep_prob, size=input_tensor.get_shape()) / keep_prob
-        output_data = input_tensor._data * self.mask
+        mask = np.random.binomial(1, keep_prob, size=input_tensor.get_shape()) / keep_prob
+        output_data = input_tensor._data * mask
         c = Tensor(output_data, _prev=(input_tensor,))
 
         def backward_fn():
-            input_tensor._grad += c._grad * self.mask
+            input_tensor._grad += c._grad * mask
             
         c._backward = backward_fn
         return c  
@@ -285,6 +292,9 @@ class optimizer():
         def step(self):
             self.t+= 1
             for p in self._model.parameters():
+                grad_norm = np.linalg.norm(p._grad)
+                if grad_norm > 1.0:  # threshold
+                    p._grad = p._grad / grad_norm
                 self.m[p] = self.beta1 * self.m[p] + (1 - self.beta1) * p._grad
                 self.v[p] = self.beta2 * self.v[p] + (1 - self.beta2) * (p._grad ** 2)
                 m_t = self.m[p]/(1 - self.beta1 ** self.t)

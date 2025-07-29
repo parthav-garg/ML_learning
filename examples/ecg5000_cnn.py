@@ -33,9 +33,8 @@ y_one_hot = np.eye(num_classes)[y]         # shape: (5000, 5)
 
 # Train/test split
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y_one_hot, test_size=0.2,stratify=y, shuffle=True
+    X, y_one_hot, test_size=0.2, random_state=42, stratify=y
 )
-print(X_train.shape, y_train.shape)
 print("ECG5000 dataset loaded.")
 
 # ================================================================
@@ -46,12 +45,12 @@ class CNN1D_Model(Module):
         super().__init__()
         self.conv1 = Conv1D(in_channels=1, out_channels=32, kernel_size=5, stride=1, padding=2)
         self.relu1 = ReLU()
-        self.dropout1 = Dropout(p=0.2)
+        self.dropout1 = Dropout(p=0.1)
         self.maxpool1 = MaxPool1D(kernel_size=2, stride=2)
         self.conv2 = Conv1D(in_channels=32, out_channels=64, kernel_size=5, stride=1, padding=2)
         self.relu2 = ReLU()
-        self.dropout2 = Dropout(p=0.2)
-        self.flatten_dim = 64 * 70  # length remains 70
+        self.dropout2 = Dropout(p=0.1)
+        self.flatten_dim = 32 * 140  # length remains 140
         self.fc1 = Linear(self.flatten_dim, 256)
         self.relu4 = ReLU()
         self.dropout4 = Dropout(p=0.4)
@@ -91,24 +90,6 @@ def train_model(model, optim, data_loader, epochs=10):
             epoch_loss += loss._data
 
             loss.backward()
-            '''# --- START DEBUGGING BLOCK ---
-            print("\n--- Gradient Norms ---")
-            total_norm = 0
-            for p in model.parameters(): # Assuming you have a named_parameters() method
-                layers = 0
-                max_norm = 0.0
-                layer = 0
-                if p._grad is not None:
-                    param_norm = np.linalg.norm(p._grad)
-                    if (param_norm > max_norm):
-                        max_norm = param_norm
-                        layer = layers
-                    layers += 1
-                    total_norm += param_norm ** 2
-                    #print(f"Layer:, Grad Norm: {param_norm:.4f}")
-            total_norm = total_norm ** 0.5
-            print(f"Total Grad Norm: {total_norm:.4f}", f"max_layer = {max_norm:.4f}", f"max_layer_index = {layer}")
-            # --- END DEBUGGING BLOCK ---'''
             optim.step()
             optim.zero_grad()
 
@@ -120,8 +101,8 @@ def train_model(model, optim, data_loader, epochs=10):
 # ================================================================
 # 4. Run Training with Adam Optimizer
 # ================================================================
-BATCH_SIZE = 64
-LEARNING_RATE = 0.0005
+BATCH_SIZE = 32
+LEARNING_RATE = 0.001
 EPOCHS = 20
 
 train_loader = DataLoader(X_train, y_train, batch_size=BATCH_SIZE, shuffle=True)
@@ -164,4 +145,4 @@ def evaluate_model(model, dataloader):
 print("\n--- EVALUATING ON TEST SET ---")
 data = DataLoader(X_test, y_test, batch_size=BATCH_SIZE, shuffle=False)
 evaluate_model(model, data)
-plt.show()
+plt.show(block = False)

@@ -264,9 +264,13 @@ class Tensor:
         def backward_fn():
             for i in range(self._data.shape[0]):
                 s = softmax_out[i].reshape(-1, 1)
-                jacobian = np.diagflat(s) - s @ s.T
-                grad = jacobian @ c._grad[i].reshape(-1, 1)
-                self._grad[i] += grad.flatten()
+                a = softmax_out
+                grad_i = a[i] * (c._grad[i] - (a[i] * c._grad[i]).sum())
+                grad_norm = np.linalg.norm(grad_i)
+                if grad_norm > 10.0:
+                    grad_i = grad_i / grad_norm * 10.0
+                    
+                self._grad[i] += grad_i
         
         c._backward = backward_fn
         return c
