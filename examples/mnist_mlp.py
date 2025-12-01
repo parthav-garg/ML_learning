@@ -90,8 +90,8 @@ def train_model(model, optim, data_loader, epochs=10):
 # 4. RUN THE COMPARISON EXPERIMENT
 # ===================================================================
 # Hyperparameters for the experiment
-LEARNING_RATE = 0.001
-EPOCHS = 10
+LEARNING_RATE = 0.0001
+EPOCHS = 100
 BATCH_SIZE = 64
 
 # Create the data loader
@@ -101,26 +101,19 @@ data = DataLoader(X_train, y_train_one_hot, batch_size=BATCH_SIZE, shuffle=True)
 print("\n--- TRAINING WITH ADAM---")
 model = MLP_Model()
 optim = optimizer.Adam(model, lr=LEARNING_RATE)
-train_model(model,optim, data)
+train_model(model,optim, data, epochs=EPOCHS)
 
 print("\n--- EVALUATING MODEL ---")
 model.eval() # Make sure to set model to evaluation mode
 
-# Use the test DataLoader you already created
 test_data = DataLoader(X_test, y_test_one_hot, batch_size=BATCH_SIZE, shuffle=False)
 correct_predictions = 0
 total_samples = 0
 
-# THIS IS THE CORRECT WAY TO ITERATE:
-# Use a standard `for` loop. It's cleaner and works perfectly with the DataLoader.
 for x_batch, y_batch in test_data:
     
     logits = model(x_batch)
-    shifted = logits - np.max(logits, axis=1, keepdims=True) #x(i) - max(x)
-    exp_shifted = np.exp(shifted) # e^(x(i) - max(x))
-    softmax_out = exp_shifted / np.sum(exp_shifted, axis=1, keepdims=True)
-    probs = softmax_out
-    
+    probs = logits.softmax()
     # Get the predicted class index for each item in the batch
     predicted_classes = np.argmax(probs._data, axis=1)
     # Get the true class index for each item in the batch
