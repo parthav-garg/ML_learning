@@ -4,35 +4,35 @@ A minimal, PyTorch-inspired deep learning framework built from scratch using **P
 
 ---
 
-## 🚀 Features
+##  Features
 
-- **🔁 Dynamic Computation Graph**  
+- ** Dynamic Computation Graph**  
   Tracks operations on `Tensor` objects and enables flexible construction of computation graphs for automatic differentiation.
 
-- **🧮 Reverse-Mode Autograd**  
+- ** Reverse-Mode Autograd**  
   Implements efficient backpropagation using **topological sorting** of the computation graph.
 
-- **🧱 Modular Neural Network API (`nn.Module`)**  
+- ** Modular Neural Network API (`nn.Module`)**  
   - PyTorch-like `Module` base class with automatic submodule registration  
   - Core layer implementations:
     - `Linear`: Fully connected layer  
     - `ReLU`: Rectified Linear Unit  
     - `Conv1D`: 1D convolution with configurable kernel size, stride, and padding
 
-- **📉 Loss Functions**  
+- ** Loss Functions**  
   - `MSELoss` (Mean Squared Error)  
   - `CrossEntropyLoss`
 
-- **⚙️ Optimizers**  
+- ** Optimizers**  
   - `SGD` (Stochastic Gradient Descent)  
   - `Adam` (Adaptive Moment Estimation)
 
-- **📦 Data Handling**  
+- ** Data Handling**  
   - Custom `DataLoader` for batching and shuffling datasets efficiently
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 .
@@ -53,15 +53,15 @@ A minimal, PyTorch-inspired deep learning framework built from scratch using **P
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
-### 🔧 Installation
+### Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 🧪 Running Examples
+### Running Examples
 
 **Train a CNN on ECG5000**
 ```bash
@@ -75,7 +75,7 @@ python -m examples.mnist_mlp
 
 ---
 
-## 🔭 Future Enhancements
+## Future Enhancements
 
 - [ ] Add `Conv2D` layer and related support
 - [ ] Implement tensor broadcasting and advanced element-wise ops
@@ -85,7 +85,7 @@ python -m examples.mnist_mlp
 
 ---
 
-## 🧠 Why This Project?
+## Why This Project?
 
 This framework was built to deeply understand:
 - How **reverse-mode autodiff** and computation graphs work  
